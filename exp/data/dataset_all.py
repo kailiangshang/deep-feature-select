@@ -108,17 +108,3 @@ def generate_train_test_loader(
     return pancreas_metadata
     
     
-if __name__ == "__main__":
-    
-    pancreas_metadata = generate_train_test_loader(
-        "E:/桌面/DFS/test_with_mnist/feature/high-dim-fs/data/pancreas.h5ad",
-        feature_indexs=[0, 1, 2]
-    )
-
-    # 生成验证集的 DataLoader
-    
-
-    # 打印验证集的 DataLoader
-    for sample in pancreas_metadata.val_loader:
-        print(sample)
-    
