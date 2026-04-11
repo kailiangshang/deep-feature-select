@@ -1,0 +1,61 @@
+base_model: GSG-Softmax+IPCAE
+base_params:
+  embedding_dim_encoder: 32
+  embedding_dim_gate: 16
+  initial_temperature: 10.0
+  final_temperature: 0.01
+
+datasets:
+  - Lung
+  - pancreas
+  - Spleen
+  - Tongue
+
+seeds: [0, 1, 2]
+
+training:
+  epochs: 1000
+  batch_size: 512
+  lr: 1e-4
+  device: cpu
+  sparse_loss_weight: 1.0
+
+classifier:
+  hidden_dim: 128
+
+ablations:
+  k_max:
+    description: "Sensitivity to number of selection slots"
+    k_values: [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+
+  sparse_loss_weight:
+    description: "Sensitivity to sparsity regularization strength"
+    values: [0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0]
+    k: 20
+
+  embedding_dim_encoder:
+    description: "Sensitivity to encoder embedding dimension"
+    values: [8, 16, 32, 64, 128, 256]
+    k: 20
+
+  embedding_dim_gate:
+    description: "Sensitivity to gate embedding dimension"
+    values: [4, 8, 16, 32, 64]
+    k: 20
+
+  temperature_schedule:
+    description: "Sensitivity to temperature annealing speed"
+    configs:
+      - initial: 5.0
+        final: 0.01
+      - initial: 10.0
+        final: 0.01
+      - initial: 20.0
+        final: 0.01
+      - initial: 10.0
+        final: 0.1
+      - initial: 10.0
+        final: 0.001
+    k: 20
+
+results_dir: exp/results/ablation
