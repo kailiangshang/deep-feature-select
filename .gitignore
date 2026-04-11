@@ -182,3 +182,13 @@ cython_debug/
 
 # Old code reference
 deep-feature-select-old/
+
+# Superpowers / brainstorm / agent skills
+.agents/
+.cache/opencode/
+
+# Experiment results
+exp/results/
+
+# Proof drafts
+docs/proof_*.md
