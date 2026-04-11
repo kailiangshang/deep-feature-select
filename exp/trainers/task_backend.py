@@ -57,6 +57,8 @@ class ClassificationBackend(TaskBackend):
 
 class RegressionBackend(TaskBackend):
     def compute_loss(self, output, target):
+        if target.dim() < output.dim():
+            target = target.unsqueeze(-1)
         return F.mse_loss(output, target.float(), reduction="mean")
 
     def get_target(self, batch):
