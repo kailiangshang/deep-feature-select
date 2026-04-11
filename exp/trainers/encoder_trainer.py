@@ -8,9 +8,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.exceptions import UndefinedMetricWarning
-from sklearn.metrics import classification_report
 
 from deepfs.core.base import EncoderFeatureModule
+from exp.trainers.task_backend import TaskBackend, get_task_backend
 from exp.utils import seed_all
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -21,30 +21,34 @@ class EncoderTrainer:
     def __init__(
         self,
         model: EncoderFeatureModule,
-        classifier: nn.Module,
+        head: nn.Module,
+        task: str | TaskBackend = "classification",
         lr: float = 1e-4,
         device: str = "cpu",
         seed: int = 0,
+        **backend_kwargs,
     ):
         self.model = model.to(device)
-        self.classifier = classifier.to(device)
+        self.head = head.to(device)
+        self.task = task if isinstance(task, TaskBackend) else get_task_backend(task, **backend_kwargs)
         self.optimizer = torch.optim.Adam(
-            list(self.model.parameters()) + list(self.classifier.parameters()), lr=lr
+            list(self.model.parameters()) + list(self.head.parameters()), lr=lr
         )
         self.seed = seed
         self.device = device
 
     def _train_epoch(self, train_loader, epoch):
         self.model.train()
-        self.classifier.train()
+        self.head.train()
         total_loss = 0.0
         num_batches = 0
         for batch in train_loader:
-            data, target = batch.X, batch.obs["cell_type"]
+            data = batch.X if hasattr(batch, "X") else batch[0]
+            target = self.task.get_target(batch)
             self.optimizer.zero_grad()
             features = self.model(data)
-            output = self.classifier(features)
-            loss = F.cross_entropy(output, target, reduction="mean")
+            output = self.head(features)
+            loss = self.task.compute_loss(output, target)
             loss.backward()
             self.optimizer.step()
             total_loss += loss.item()
@@ -54,43 +58,43 @@ class EncoderTrainer:
 
     def _evaluate(self, test_loader):
         self.model.eval()
-        self.classifier.eval()
+        self.head.eval()
         if test_loader is None:
             return 0.0, {}
         all_preds = []
         all_targets = []
         with torch.no_grad():
             for batch in test_loader:
-                data, target = batch.X, batch.obs["cell_type"]
+                data = batch.X if hasattr(batch, "X") else batch[0]
+                target = self.task.get_target(batch)
                 features = self.model(data)
-                output = self.classifier(features)
-                preds = output.argmax(dim=1)
-                all_preds.append(preds.cpu().numpy())
+                output = self.head(features)
+                all_preds.append(self.task.predict(output))
                 all_targets.append(target.cpu().numpy())
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
-        report = classification_report(all_targets, all_preds, output_dict=True)
-        return report["accuracy"], report
+        result = self.task.evaluate(all_preds, all_targets)
+        return result["metric"], result
 
     def fit(self, train_loader, epochs, test_loader=None):
         seed_all(self.seed)
         records = []
         for epoch in range(epochs):
             loss = self._train_epoch(train_loader, epoch)
-            acc, report = self._evaluate(test_loader)
-            result = self.model.get_selection_result()
+            metric, report = self._evaluate(test_loader)
+            sel_result = self.model.get_selection_result()
             records.append(
                 {
                     "epoch": epoch + 1,
-                    "loss_cls": loss,
-                    "accuracy": acc,
-                    "num_selected": result.num_selected,
+                    "loss_task": loss,
+                    self.task.metric_name: metric,
+                    "num_selected": sel_result.num_selected,
                 }
             )
             print(
                 f"Epoch {epoch+1}/{epochs}, "
                 f"Loss: {loss:.4f}, "
-                f"Accuracy: {acc:.4f}, "
-                f"Features: {result.num_selected}"
+                f"{self.task.metric_name}: {metric:.4f}, "
+                f"Features: {sel_result.num_selected}"
             )
         return pd.DataFrame(records)

@@ -62,7 +62,88 @@ AnnLoader (train / test)
 损失:     loss = cross_entropy(output, target) [+ λ × sparsity_loss]
 ```
 
-## 3. 训练器说明
+## 3. 下游任务支持
+
+所有训练器通过 `task` 参数支持三种下游任务：
+
+| task | 损失函数 | 评估指标 | 数据 target |
+|------|---------|---------|------------|
+| `"classification"` | cross_entropy | accuracy, F1 | `batch.obs["cell_type"]` |
+| `"regression"` | MSE | R², RMSE | `batch.obs["target"]` |
+| `"reconstruction"` | MSE | neg_MSE | `batch.X`（原始输入） |
+
+### 3.1 分类（默认）
+
+```python
+from deepfs import GumbelSoftmaxGateIndirectConcreteModel
+from exp.trainers import GateEncoderTrainer
+from exp.utils import MLPClassifier
+
+model = GumbelSoftmaxGateIndirectConcreteModel(input_dim=1000, k=50, ...)
+head = MLPClassifier(input_dim=50, hidden_dim=128, output_dim=5)
+trainer = GateEncoderTrainer(model, head, task="classification", sparse_loss_weight=1.0)
+result_df, feature_df = trainer.fit(train_loader, epochs=1000, test_loader=test_loader)
+# result_df 列: epoch, loss_task, loss_sparsity, accuracy, num_selected, ...
+```
+
+### 3.2 回归
+
+```python
+from exp.utils import MLPRegressor
+
+head = MLPRegressor(input_dim=50, hidden_dim=128, output_dim=1)  # 单值回归
+trainer = GateEncoderTrainer(model, head, task="regression", sparse_loss_weight=1.0)
+result_df, feature_df = trainer.fit(train_loader, epochs=1000)
+# result_df 列: epoch, loss_task, loss_sparsity, r2, num_selected, ...
+```
+
+h5ad 数据需包含 `.obs["target"]` 列作为回归目标。
+
+### 3.3 重构（自编码器）
+
+```python
+from exp.utils import AutoencoderHead
+
+head = AutoencoderHead(input_dim=50, hidden_dim=128, output_dim=1000)  # 重构回原始维度
+trainer = GateEncoderTrainer(model, head, task="reconstruction",
+                             sparse_loss_weight=1.0, input_dim=1000)
+result_df, feature_df = trainer.fit(train_loader, epochs=1000)
+# result_df 列: epoch, loss_task, loss_sparsity, neg_mse, num_selected, ...
+```
+
+重构任务的 target 是原始输入 `batch.X`，模型学习选取少量特征后还原原始数据。
+
+### 3.4 自定义 TaskBackend
+
+如需其他任务类型（如多标签分类、排序等），继承 `TaskBackend`：
+
+```python
+from exp.trainers import TaskBackend
+
+class MultiLabelBackend(TaskBackend):
+    def compute_loss(self, output, target):
+        return F.binary_cross_entropy_with_logits(output, target.float())
+
+    def get_target(self, batch):
+        return batch.obs["labels"]  # 多标签
+
+    def evaluate(self, predictions, targets):
+        from sklearn.metrics import f1_score
+        preds = (predictions > 0.5).astype(int)
+        return {"metric": f1_score(targets, preds, average="micro")}
+
+    def predict(self, output):
+        return torch.sigmoid(output).detach().cpu().numpy()
+
+    @property
+    def metric_name(self):
+        return "f1_micro"
+
+# 使用
+trainer = GateEncoderTrainer(model, head, task=MultiLabelBackend(), ...)
+```
+
+## 4. 训练器说明
 
 三个训练器对应三类模型：
 
@@ -77,7 +158,7 @@ AnnLoader (train / test)
 2. 在测试集上评估 accuracy
 3. 打印训练日志
 
-## 4. 运行实验
+## 5. 运行实验
 
 ### 4.1 对比实验
 
@@ -138,7 +219,7 @@ python exp/run_hyperparameter.py --config exp/configs/hyperparameter.yaml
 
 输出：`exp/results/hyperparameter/hyperparameter_results.csv`
 
-## 5. 修改 YAML 配置
+## 6. 修改 YAML 配置
 
 所有实验参数在 YAML 中定义，无需改代码即可调整实验。
 
@@ -177,7 +258,7 @@ gate_models:
     sparse_loss_weights: [0.1, 1.0, 10.0]   # 缩小范围
 ```
 
-## 6. 结果分析
+## 7. 结果分析
 
 ### 可视化
 
@@ -202,7 +283,7 @@ ablation_df = pd.read_csv("exp/results/ablation/ablation_results.csv")
 generate_ablation_table(ablation_df, "exp/results/ablation/tables")
 ```
 
-## 7. 用自己的数据
+## 8. 用自己的数据
 
 ### 方式 A：h5ad 格式（推荐）
 
@@ -266,7 +347,7 @@ class AnnDataLikeLoader:
 wrapped_loader = AnnDataLikeLoader(train_loader)
 ```
 
-## 8. GPU 使用
+## 9. GPU 使用
 
 修改 YAML 中的 `device`：
 
@@ -277,7 +358,7 @@ training:
 
 或运行时覆盖（需修改代码支持，当前从 YAML 读取）。
 
-## 9. 常见问题
+## 10. 常见问题
 
 **Q: 数据文件在哪里？**
 A: `.h5ad` 文件不随 git 提交（在 `.gitignore` 中）。从 `deep-feature-select-old/exp/data/` 拷贝。
