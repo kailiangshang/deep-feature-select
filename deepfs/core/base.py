@@ -1,197 +1,169 @@
-"""
-Base classes for Deep Feature Selection
-"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
+from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 
-from .types import SparsityLoss, SelectionResult
+from .types import (
+    EncoderDiagnostics,
+    GateDiagnostics,
+    SelectionResult,
+    SparsityLoss,
+    TemperatureSchedule,
+)
 
 
 class BaseSelector(nn.Module, ABC):
-    """
-    Abstract base class for all feature selectors.
-    """
-    
+
     def __init__(self, device: str = "cpu"):
         super().__init__()
         self.device = device
-        self._selection_result: Optional[SelectionResult] = None
-    
+
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass - apply feature selection.
-        
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor of shape (batch_size, input_dim)
-            
-        Returns
-        -------
-        torch.Tensor
-            Selected features
-        """
-        pass
-    
+        ...
+
     @abstractmethod
     def get_selection_result(self) -> SelectionResult:
-        """
-        Get the feature selection result.
-        
-        Returns
-        -------
-        SelectionResult
-            Contains selected indices, mask, and probabilities
-        """
+        ...
+
+    def update_temperature(self, epoch: int) -> None:
         pass
-    
-    def to(self, device: Union[str, torch.device]) -> "BaseSelector":
-        """Move module to device."""
-        self.device = str(device)
-        return super().to(device)
+
+    def to(self, device, **kwargs):
+        self.device = str(device) if not isinstance(device, str) else device
+        return super().to(device, **kwargs)
 
 
-class GateBase(BaseSelector):
-    """
-    Abstract base class for gate-based feature selectors.
-    
-    Gate methods learn a probability for each feature independently,
-    then apply element-wise multiplication to select features.
-    The number of selected features is controlled by sparsity loss.
-    
-    Examples: STG, GSG, Gumbel Softmax Gate, HCG
-    """
-    
+class EncoderFeatureModule(BaseSelector):
+
     def __init__(
         self,
         input_dim: int,
+        output_dim: int,
+        temperature_schedule: TemperatureSchedule,
         device: str = "cpu",
-        hard_gate_type: str = "hard_zero"
     ):
         super().__init__(device=device)
         self.input_dim = input_dim
-        self.hard_gate_type = hard_gate_type
-        self._gate_probs: Optional[torch.Tensor] = None
-    
-    @abstractmethod
-    def sparsity_loss(self) -> SparsityLoss:
-        """
-        Compute sparsity loss to encourage feature selection.
-        
-        Returns
-        -------
-        SparsityLoss
-            Named tuple containing loss names and values
-        """
-        pass
-    
-    @property
-    @abstractmethod
-    def num_selected(self) -> int:
-        """Get the number of selected features."""
-        pass
-    
-    @property
-    @abstractmethod
-    def gate_probs(self) -> torch.Tensor:
-        """Get current gate probabilities."""
-        pass
-    
-    def _apply_hard_gate(self, gate_logits: torch.Tensor) -> torch.Tensor:
-        """
-        Apply hard gate during inference.
-        
-        Parameters
-        ----------
-        gate_logits : torch.Tensor
-            Gate logits or probabilities
-            
-        Returns
-        -------
-        torch.Tensor
-            Binary gate values (0 or 1)
-        """
-        if self.hard_gate_type == "hard_zero":
-            return torch.where(gate_logits > 0, 1.0, 0.0)
-        elif self.hard_gate_type == "hard_one":
-            return torch.where(gate_logits == 1, 1.0, 0.0)
-        else:
-            raise ValueError(f"Unknown hard_gate_type: {self.hard_gate_type}")
-    
-    def get_selection_result(self) -> SelectionResult:
-        """Get the feature selection result."""
-        if self._gate_probs is None:
-            raise RuntimeError("Gate probabilities not available. Run forward pass first.")
-        
-        probs = self._gate_probs.detach().cpu()
-        
-        if self.training:
-            # During training, use soft selection
-            mask = probs > 0.5
-        else:
-            # During inference, use hard selection
-            mask = self._apply_hard_gate(probs).bool()
-        
-        # Create index array (-1 for not selected)
-        indices = torch.arange(self.input_dim)
-        indices[~mask.squeeze()] = -1
-        
-        return SelectionResult(
-            selected_indices=indices.numpy(),
-            selected_mask=mask.squeeze().numpy(),
-            gate_probs=probs.squeeze().numpy(),
-            num_selected=int(mask.sum().item())
-        )
+        self.output_dim = output_dim
+        self.temperature_schedule = temperature_schedule
+        self.temperature = torch.tensor(temperature_schedule.initial)
+        self._selected_indices: Optional[torch.Tensor] = None
+        self._encoder_soft_prob: Optional[torch.Tensor] = None
 
+    def update_temperature(self, epoch: int) -> None:
+        t = self.temperature_schedule.get_temperature(epoch)
+        self.temperature = torch.tensor(t)
 
-class EncoderBase(BaseSelector):
-    """
-    Abstract base class for encoder-based feature selectors.
-    
-    Encoder methods explicitly select exactly k features using
-    a learned selection matrix with Gumbel-Softmax relaxation.
-    
-    Examples: Concrete Encoder (CAE), Indirect Concrete Encoder (IPCAE)
-    """
-    
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,  # k features to select
-        device: str = "cpu"
-    ):
-        super().__init__(device=device)
-        self.input_dim = input_dim
-        self.output_dim = output_dim  # k
-    
-    # Note: logits should be implemented as either a Parameter or property
-    # depending on the encoder type
-    
     @property
     @abstractmethod
     def selected_indices(self) -> torch.Tensor:
-        """Get indices of selected features."""
-        pass
-    
+        ...
+
     def get_selection_result(self) -> SelectionResult:
-        """Get the feature selection result."""
-        indices = self.selected_indices.detach().cpu().numpy()
-        
-        # Create mask
+        indices = self.selected_indices
         mask = np.zeros(self.input_dim, dtype=bool)
-        valid_indices = indices[indices >= 0]
-        mask[valid_indices] = True
-        
+        indices_np = indices.detach().cpu().numpy()
+        valid = indices_np >= 0
+        mask[indices_np[valid]] = True
+        gate_probs = None
+        if self._encoder_soft_prob is not None:
+            gate_probs = self._encoder_soft_prob.detach().cpu().numpy()
         return SelectionResult(
-            selected_indices=indices,
+            selected_indices=indices_np,
             selected_mask=mask,
-            gate_probs=None,
-            num_selected=len(valid_indices)
+            gate_probs=gate_probs,
         )
+
+    def encoder_diagnostics(self) -> EncoderDiagnostics:
+        soft_prob = self._encoder_soft_prob
+        if soft_prob is None:
+            raise ValueError("_encoder_soft_prob is not set")
+        prob_np = soft_prob.detach().cpu().numpy()
+        indices = self.selected_indices.detach().cpu().numpy()
+        entropy = -np.sum(prob_np * np.log(prob_np + 1e-10), axis=-1)
+        feature_overlap = int(np.sum(np.bincount(indices[indices >= 0]) > 1)) if len(indices[indices >= 0]) > 0 else 0
+        return EncoderDiagnostics(
+            selected_indices=indices,
+            selection_entropy=entropy,
+            feature_overlap=feature_overlap,
+        )
+
+
+class GateFeatureModule(BaseSelector):
+
+    def __init__(
+        self,
+        input_dim: int,
+        temperature_schedule: Optional[TemperatureSchedule] = None,
+        device: str = "cpu",
+    ):
+        super().__init__(device=device)
+        self.input_dim = input_dim
+        self.temperature_schedule = temperature_schedule
+        if temperature_schedule is not None:
+            self.temperature = torch.tensor(temperature_schedule.initial)
+        else:
+            self.temperature = None
+        self._selected_indices: Optional[torch.Tensor] = None
+        self._gate_soft_prob: Optional[torch.Tensor] = None
+
+    def update_temperature(self, epoch: int) -> None:
+        if self.temperature_schedule is not None:
+            t = self.temperature_schedule.get_temperature(epoch)
+            self.temperature = torch.tensor(t)
+
+    @abstractmethod
+    def sparsity_loss(self) -> SparsityLoss:
+        ...
+
+    @property
+    @abstractmethod
+    def selected_indices_candidate(self) -> torch.Tensor:
+        ...
+
+    def get_selection_result(self) -> SelectionResult:
+        indices = self.selected_indices_candidate
+        mask = np.zeros(self.input_dim, dtype=bool)
+        indices_np = indices.detach().cpu().numpy()
+        valid = indices_np >= 0
+        mask[indices_np[valid]] = True
+        gate_probs = None
+        if self._gate_soft_prob is not None:
+            gate_probs = self._gate_soft_prob.detach().cpu().numpy()
+        return SelectionResult(
+            selected_indices=indices_np,
+            selected_mask=mask,
+            gate_probs=gate_probs,
+        )
+
+    def gate_diagnostics(self) -> GateDiagnostics:
+        soft_prob = self._gate_soft_prob
+        if soft_prob is None:
+            raise ValueError("_gate_soft_prob is not set")
+        prob_np = soft_prob.detach().cpu().numpy()
+        threshold = 0.5
+        open_mask = prob_np > threshold
+        num_open = int(open_mask.sum())
+        num_closed = int((~open_mask).sum())
+        open_ratio = num_open / len(prob_np) if len(prob_np) > 0 else 0.0
+        entropy = -np.sum(prob_np * np.log(prob_np + 1e-10) + (1 - prob_np) * np.log(1 - prob_np + 1e-10))
+        return GateDiagnostics(
+            gate_probs=prob_np,
+            num_open=num_open,
+            num_closed=num_closed,
+            open_ratio=open_ratio,
+            threshold=threshold,
+            entropy=float(entropy),
+        )
+
+    def encoder_diagnostics(self) -> Optional[EncoderDiagnostics]:
+        return None
+
+
+GateBase = GateFeatureModule
+EncoderBase = EncoderFeatureModule
