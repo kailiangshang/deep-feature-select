@@ -1,15 +1,29 @@
 from __future__ import annotations
 
 import os
+import json
 
 import yaml
-import torch
 import pandas as pd
 
 from deepfs import GumbelSoftmaxGateIndirectConcreteModel
 from exp.data import generate_train_test_loader
 from exp.trainers import GateEncoderTrainer
 from exp.utils import MLPClassifier, seed_all
+
+
+def _param_count(model):
+    return sum(p.numel() for p in model.parameters())
+
+
+def _save_group(results_dir, group_name, result_df, feature_df, meta):
+    group_dir = os.path.join(results_dir, "per_group")
+    os.makedirs(group_dir, exist_ok=True)
+    result_df.to_csv(os.path.join(group_dir, f"{group_name}_result.csv"), index=False)
+    if feature_df is not None:
+        feature_df.to_csv(os.path.join(group_dir, f"{group_name}_features.csv"), index=False)
+    with open(os.path.join(group_dir, f"{group_name}_meta.json"), "w") as f:
+        json.dump(meta, f, indent=2, default=str)
 
 
 def run_hyperparameter(config):
@@ -31,45 +45,61 @@ def run_hyperparameter(config):
 
             for hp_name, hp_cfg in config["hyperparameters"].items():
                 print(f"\nHyperparam: {hp_name} | Dataset: {dataset_name} | Seed: {seed}")
-                records = []
 
                 for val in hp_cfg["values"]:
                     seed_all(seed)
                     k = base_params["k"]
-                    params = dict(base_params)
-                    params["input_dim"] = data.feature_dim
-                    params["k"] = k
-                    params["total_epochs"] = training_cfg["epochs"]
-                    params["device"] = training_cfg["device"]
-
+                    params = {**base_params, "input_dim": data.feature_dim, "k": k,
+                              "total_epochs": training_cfg["epochs"], "device": training_cfg["device"]}
+                    lr = training_cfg.get("lr", 1e-4)
                     if hp_cfg["param"] == "lr":
                         lr = val
                     else:
-                        lr = training_cfg["lr"]
                         params[hp_cfg["param"]] = val
 
                     model = GumbelSoftmaxGateIndirectConcreteModel(**params)
-                    classifier = MLPClassifier(k, classifier_cfg["hidden_dim"],
-                                               data.cls_num, training_cfg["device"])
-                    trainer = GateEncoderTrainer(model, classifier,
-                                                 sparse_loss_weight=base_params.get("sparse_loss_weight", 1.0),
-                                                 lr=lr, device=training_cfg["device"], seed=seed)
-                    df, _ = trainer.fit(data.train_loader, training_cfg["epochs"], data.test_loader)
-                    df["hyperparam"] = hp_name
-                    df["param_value"] = val
-                    df["dataset"] = dataset_name
-                    df["seed"] = seed
-                    records.append(df)
+                    head = MLPClassifier(k, classifier_cfg["hidden_dim"],
+                                         data.cls_num, training_cfg["device"])
+                    trainer = GateEncoderTrainer(
+                        model, head, task="classification",
+                        sparse_loss_weight=base_params.get("sparse_loss_weight", 1.0),
+                        lr=lr, device=training_cfg["device"], seed=seed,
+                    )
+                    result_df, feature_df = trainer.fit(data.train_loader, training_cfg["epochs"], data.test_loader)
+                    result_df["hyperparam"] = hp_name
+                    result_df["param_value"] = val
+                    result_df["dataset"] = dataset_name
+                    result_df["seed"] = seed
+                    result_df["k"] = k
+                    result_df["param_count"] = _param_count(model)
+                    all_results.append(result_df)
 
-                if records:
-                    hp_df = pd.concat(records, ignore_index=True)
-                    all_results.append(hp_df)
-                    hp_df.to_csv(os.path.join(results_dir, f"{hp_name}_{dataset_name}_seed{seed}.csv"), index=False)
+                    group_name = f"hp_{hp_name}_{dataset_name}_seed{seed}_{val}"
+                    meta = {
+                        "hyperparam": hp_name, "param_value": val,
+                        "dataset": dataset_name, "seed": seed, "k": k, "lr": lr,
+                        "param_count": _param_count(model),
+                        "final_accuracy": float(result_df["accuracy"].iloc[-1]),
+                        "final_num_selected": int(result_df["num_selected"].iloc[-1]),
+                    }
+                    _save_group(results_dir, group_name, result_df, feature_df, meta)
 
     if all_results:
         final_df = pd.concat(all_results, ignore_index=True)
         final_df.to_csv(os.path.join(results_dir, "hyperparameter_results.csv"), index=False)
-        print(f"\nResults saved to {results_dir}/hyperparameter_results.csv")
+
+        summary = final_df[final_df["epoch"] == final_df["epoch"].max()].groupby(
+            ["hyperparam", "param_value", "dataset"]
+        ).agg(
+            accuracy_mean=("accuracy", "mean"),
+            accuracy_std=("accuracy", "std"),
+            num_selected_mean=("num_selected", "mean"),
+        ).reset_index()
+        summary.to_csv(os.path.join(results_dir, "hyperparameter_summary.csv"), index=False)
+        print(f"\nResults saved to {results_dir}/")
+        print(f"  hyperparameter_results.csv  — all epochs")
+        print(f"  hyperparameter_summary.csv  — final epoch summary")
+        print(f"  per_group/                  — per-experiment details")
 
 
 def main():
