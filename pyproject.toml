@@ -27,3 +27,8 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["deepfs*"]
+
+[dependency-groups]
+dev = [
+    "torchvision>=0.26.0",
+]

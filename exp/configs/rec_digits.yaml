@@ -1,0 +1,54 @@
+task: reconstruction
+datasets:
+  - SklearnDigitsAE
+
+seeds: [0, 1, 2]
+
+training:
+  epochs: 300
+  batch_size: 128
+  lr: 2e-3
+  device: cpu
+
+head:
+  hidden_dim: 128
+
+k_default: 20
+
+encoder_models:
+  - name: CAE
+    class: ConcreteAutoencoderModel
+    k_values: [20, 30]
+    params:
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+  - name: IPCAE
+    class: IndirectConcreteAutoencoderModel
+    k_values: [20, 30]
+    params:
+      embedding_dim: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+combined_models:
+  - name: GSG-Softmax+IPCAE
+    class: GumbelSoftmaxGateIndirectConcreteModel
+    sparse_loss_weights: [0.01, 0.1]
+    k_values: [20, 30]
+    params:
+      embedding_dim_encoder: 16
+      embedding_dim_gate: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+  - name: HCG+IPCAE
+    class: HardConcreteGateIndirectConcreteModel
+    sparse_loss_weights: [0.01, 0.1]
+    k_values: [20, 30]
+    params:
+      embedding_dim_encoder: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+results_dir: exp/results/rec_digits
