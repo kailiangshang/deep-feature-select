@@ -6,9 +6,6 @@ import torch.nn.functional as F
 
 def generate_gumbel_noise(like_tensor: torch.Tensor, eps: float = 1e-10) -> torch.Tensor:
     uniform = torch.rand_like(like_tensor, device=like_tensor.device)
-    if len(like_tensor.shape) == 1:
-        uniform_ = torch.rand_like(like_tensor, device=like_tensor.device)
-        return torch.log(torch.log(uniform + eps) / torch.log(uniform_ + eps) + eps)
     return -torch.log(-torch.log(uniform + eps) + eps)
 
 

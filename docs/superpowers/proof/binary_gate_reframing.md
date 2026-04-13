@@ -62,7 +62,7 @@ Our reframing:
 - Better than sigmoid: can reach exact 0 and 1
 - But still continuous in between → same threshold problem
 
-**Stage 4: Our Method — GSG-Softmax**
+**Stage 4: GSG-Softmax + IPCAE (Our Combined Method)**
 - Instead of relaxing binary → continuous and then thresholding back...
 - **Directly model binary selection as 2-class classification**
 - Use Gumbel Softmax (designed for classification!) for its intended purpose
@@ -79,7 +79,7 @@ Everyone treated the open/closed decision as a **regression** problem (sigmoid),
 [Open/Closed Decision] ← Sigmoid (regression) ✗
 ```
 
-Our contribution is making both parts classification:
+Our contribution is applying Gumbel Softmax to both parts as classification, and combining them:
 
 ```
 [Feature Assignment]  ← Gumbel Softmax (multi-class) ✓
@@ -94,7 +94,7 @@ Prior methods entangle two distinct decisions:
 
 STG conflates these: gate probability p_i mixes both "is this feature important" and "how much does it contribute." There's no separate mechanism.
 
-Our method **disentangles** them:
+The combined GSG-Softmax + IPCAE method **disentangles** them:
 - **Gate (GSG-Softmax):** Binary open/close per slot (selection)
 - **Encoder (Concrete):** Multi-class feature-to-slot (assignment)
 
@@ -238,7 +238,7 @@ where gate_residual = -f(X) · diag(1 - g)
 > fundamentally binary — a feature is either selected or not — and should be modeled
 > as a 2-class classification problem. By applying Gumbel Softmax in its natural
 > setting (classification) to the gate, we eliminate the threshold parameter entirely.
-> Combined with indirect parameterization for the encoder, our method is the first
+> Combined with indirect parameterization for the encoder, the GSG-Softmax + IPCAE method is the first
 > to guarantee both binary selection and training stability in high dimensions."
 
 ---

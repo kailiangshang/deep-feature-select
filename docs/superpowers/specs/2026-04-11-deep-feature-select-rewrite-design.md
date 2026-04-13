@@ -20,7 +20,7 @@ Rewrite the deep feature selection library, keeping mathematical correctness as 
 | Combined | GSG-Softmax+CAE, GSG-Softmax+IPCAE, STG+CAE, STG+IPCAE, HCG+CAE, HCG+IPCAE | Full comparisons |
 | **Core** | **GSG-Softmax+IPCAE** | **Paper contribution** |
 
-Note: GSG has two variants. GSG-Sigmoid is unstable (baseline). GSG-Softmax is the proposed gate mechanism.
+Note: GSG has two variants. GSG-Sigmoid is unstable (baseline). GSG-Softmax is the gate used in our combined method.
 
 ---
 
@@ -63,7 +63,7 @@ Note: GSG has two variants. GSG-Sigmoid is unstable (baseline). GSG-Softmax is t
 - **Sparsity Loss**: `L = mean(z)` (L1)
 - **Note**: Unstable in practice, used as baseline comparison
 
-### 2.6 GSG-Softmax (Gumbel Softmax Gate, Proposed)
+### 2.6 GSG-Softmax (Gumbel Softmax Gate, Jang et al. 2016)
 
 - **Parameters**: `G_emb ∈ R^{2×h}, G_feat ∈ R^{h×d}` (low-rank, 2 classes = open/close)
 - **Logits**: `L = (G_feat^T @ G_emb^T)^T ∈ R^{2×d}`

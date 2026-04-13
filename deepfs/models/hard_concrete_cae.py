@@ -63,10 +63,9 @@ class HardConcreteGateConcreteModel(GateFeatureModule):
             return torch.matmul(x, y)
 
     def sparsity_loss(self) -> SparsityLoss:
-        loss = torch.mean(
-            torch.sigmoid(self.gate_logits)
-            - self.hcg_temperature * torch.log(-torch.tensor(self.gamma) / torch.tensor(self.zeta))
-        )
+        loss = torch.mean(torch.sigmoid(
+            self.gate_logits - self.hcg_temperature * torch.log(torch.tensor(-self.gamma / self.zeta))
+        ))
         return SparsityLoss(names=["hcg_cae_l0"], values=[loss])
 
     @property
