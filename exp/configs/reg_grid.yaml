@@ -1,0 +1,57 @@
+task: regression
+datasets:
+  - SklearnReg
+
+seeds: [0, 1, 2]
+
+training:
+  epochs: 300
+  batch_size: 64
+  lr: 2e-3
+  device: cpu
+
+head:
+  hidden_dim: 128
+
+k_default: 20
+
+encoder_models:
+  - name: CAE
+    class: ConcreteAutoencoderModel
+    k_values: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 35, 40, 45, 50]
+    params:
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+  - name: IPCAE
+    class: IndirectConcreteAutoencoderModel
+    k_values: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 35, 40, 45, 50]
+    params:
+      embedding_dim: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+combined_models:
+  - name: GSG-Softmax+IPCAE
+    class: GumbelSoftmaxGateIndirectConcreteModel
+    sparse_loss_weights: [0.01, 0.1]
+    k_values: [20]
+    params:
+      embedding_dim_encoder: 16
+      embedding_dim_gate: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+  - name: HCG+IPCAE
+    class: HardConcreteGateIndirectConcreteModel
+    sparse_loss_weights: [0.01, 0.1]
+    k_values: [20]
+    params:
+      embedding_dim_encoder: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+results_dir: exp/results/reg_grid
+
+baseline_n_features: [10, 20, 30]
+threshold_sweep_sw: [0.1, 1.0]
