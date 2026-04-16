@@ -1,3 +1,12 @@
+'''
+Author: kailiangs
+Date: 2026-04-13 20:25:41
+LastEditors: kailiangs
+LastEditTime: 2026-04-16 16:23:41
+FilePath: /deep-feature-select/deepfs/models/gumbel_sigmoid_gate.py
+Description: 
+
+'''
 from __future__ import annotations
 
 import torch
@@ -28,8 +37,10 @@ class GumbelSigmoidGateModel(GateFeatureModule):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training:
-            noise = generate_gumbel_noise(self.gate_logits)
-            gate_prob = torch.sigmoid((self.gate_logits + noise) / self.temperature)
+            g1 = generate_gumbel_noise(self.gate_logits)
+            g2 = generate_gumbel_noise(self.gate_logits)
+            logistic_noise = g1 - g2  # Logistic(0,1) = Gumbel - Gumbel
+            gate_prob = torch.sigmoid((self.gate_logits + logistic_noise) / self.temperature)
             self._gate_soft_prob = gate_prob
             return x * gate_prob
         else:
@@ -41,9 +52,7 @@ class GumbelSigmoidGateModel(GateFeatureModule):
             return torch.matmul(x, y)
 
     def sparsity_loss(self) -> SparsityLoss:
-        noise = generate_gumbel_noise(self.gate_logits)
-        gate_prob = torch.sigmoid((self.gate_logits + noise) / self.temperature)
-        l1_loss = torch.mean(torch.abs(gate_prob))
+        l1_loss = torch.mean(torch.abs(self._gate_soft_prob))
         return SparsityLoss(names=["gsg_sigmoid_l1"], values=[l1_loss])
 
     @property
