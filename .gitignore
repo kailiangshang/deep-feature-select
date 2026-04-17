@@ -189,6 +189,9 @@ deep-feature-select-old/
 
 # Experiment results
 exp/results/
+exp_cls/results/
+exp_cls/logs_*.log
+exp_cls/data/
 
 # Proof drafts
 docs/proof_*.md

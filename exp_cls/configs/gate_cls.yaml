@@ -1,0 +1,49 @@
+task: classification
+
+datasets:
+  - Lung
+  - pancreas
+  - Spleen
+  - Tongue
+
+seeds: [0, 1, 2]
+
+training:
+  epochs: 1000
+  batch_size: 512
+  lr: 1e-4
+  device: cpu
+
+classifier:
+  hidden_dim: 128
+
+gate_models:
+  - name: STG
+    class: StochasticGateModel
+    sparse_loss_weights: [0.01, 0.1, 1, 10, 100]
+    params:
+      sigma: 1.0
+
+  - name: GSG-Sigmoid
+    class: GumbelSigmoidGateModel
+    sparse_loss_weights: [0.01, 0.1, 1, 10, 100]
+    params:
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+  - name: GSG-Softmax
+    class: GumbelSoftmaxGateModel
+    sparse_loss_weights: [0.01, 0.1, 1, 10, 100]
+    params:
+      embedding_dim: 16
+      initial_temperature: 10.0
+      final_temperature: 0.01
+
+  - name: HCG
+    class: HardConcreteGateModel
+    sparse_loss_weights: [0.01, 0.1, 1, 10, 100]
+    params:
+      min_max_scale: [-0.1, 1.1]
+      temperature: 0.5
+
+results_dir: exp_cls/results
