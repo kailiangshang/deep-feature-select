@@ -52,11 +52,12 @@ def generate_train_test_loader(
         stratify=adata.obs["cell_type"],
     )
 
+    use_cuda = device.startswith("cuda")
     train_loader = AnnLoader(
-        train_ad, batch_size=batch_size, shuffle=shuffle, use_cuda=(device == "cuda")
+        train_ad, batch_size=batch_size, shuffle=shuffle, use_cuda=use_cuda
     )
     test_loader = AnnLoader(
-        test_ad, batch_size=batch_size, shuffle=shuffle, use_cuda=(device == "cuda")
+        test_ad, batch_size=batch_size, shuffle=shuffle, use_cuda=use_cuda
     )
 
     return MetaData(

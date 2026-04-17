@@ -44,8 +44,8 @@ class EncoderTrainer:
         total_loss = 0.0
         num_batches = 0
         for batch in train_loader:
-            data = batch.X if hasattr(batch, "X") else batch[0]
-            target = self.task.get_target(batch)
+            data = (batch.X if hasattr(batch, "X") else batch[0]).to(self.device)
+            target = self.task.get_target(batch).to(self.device)
             self.optimizer.zero_grad()
             features = self.model(data)
             output = self.head(features)
@@ -65,8 +65,8 @@ class EncoderTrainer:
         all_preds, all_targets = [], []
         with torch.no_grad():
             for batch in test_loader:
-                data = batch.X if hasattr(batch, "X") else batch[0]
-                target = self.task.get_target(batch)
+                data = (batch.X if hasattr(batch, "X") else batch[0]).to(self.device)
+                target = self.task.get_target(batch).to(self.device)
                 features = self.model(data)
                 output = self.head(features)
                 all_preds.append(self.task.predict(output))
